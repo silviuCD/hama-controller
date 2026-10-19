@@ -330,3 +330,42 @@ jobs:
                   statusText.text = "Se trimite " + name + "..."
                   thread {
                       val ok = sendLibreCommand("netRemote.play.uri=" + url)
+                      runOnUiThread {
+                          statusText.text = if (ok) "Reda acum: " + name else "Eroare trimitere stream."
+                      }
+                  }
+              }
+
+              private fun sendLibreCommand(query: String) {
+                  val host = ipInput.text.toString().trim()
+                  getSharedPreferences("hama", MODE_PRIVATE).edit().putString("ip", host).apply()
+                  thread {
+                      try {
+                          val url = URL("http://" + host + "/webSSAPI.fcgi?" + query)
+                          val conn = (url.openConnection() as HttpURLConnection).apply {
+                              requestMethod = "GET"
+                              connectTimeout = 3000
+                              readTimeout = 3000
+                          }
+                          val code = conn.responseCode
+                          conn.disconnect()
+                          runOnUiThread {
+                              statusText.text = if (code in 200..299) "Comanda executata cu succes!" else "Eroare server boxa."
+                          }
+                      } catch (e: Exception) {
+                        runOnUiThread {
+                              statusText.text = "Eroare de conexiune la IP-ul boxei."
+                          }
+                      }
+                  }
+              }
+          }
+          EOF
+
+          ./gradlew assembleDebug --no-daemon
+
+      - name: Upload APK Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Hama-Controller-APK
+          path: app/build/outputs/apk/debug/app-debug.apk

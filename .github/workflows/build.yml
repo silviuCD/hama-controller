@@ -180,7 +180,7 @@ jobs:
                           override fun onStartTrackingTouch(s: SeekBar?) {}
                           override fun onStopTrackingTouch(s: SeekBar?) {
                               val v = s?.progress ?: 25
-                              sendLibreCommand("netRemote.sys.audio.volume=" + v)
+                              sendLibreCommandAsync("netRemote.sys.audio.volume=" + v)
                           }
                       })
                   }
@@ -194,13 +194,13 @@ jobs:
                       setMargins(8, 0, 8, 0)
                   }
                   transportRow.addView(makeButton("Play", "#E53935") {
-                      sendLibreCommand("netRemote.play.control=1")
+                      sendLibreCommandAsync("netRemote.play.control=1")
                   }, lp)
                   transportRow.addView(makeButton("Pause", "#424242") {
-                      sendLibreCommand("netRemote.play.control=2")
+                      sendLibreCommandAsync("netRemote.play.control=2")
                   }, lp)
                   transportRow.addView(makeButton("Stop", "#424242") {
-                      sendLibreCommand("netRemote.play.control=3")
+                      sendLibreCommandAsync("netRemote.play.control=3")
                   }, lp)
                   layout.addView(transportRow)
 
@@ -336,27 +336,35 @@ jobs:
                   }
               }
 
-              private fun sendLibreCommand(query: String) {
+              private fun sendLibreCommandAsync(query: String) {
                   val host = ipInput.text.toString().trim()
                   getSharedPreferences("hama", MODE_PRIVATE).edit().putString("ip", host).apply()
                   thread {
-                      try {
-                          val url = URL("http://" + host + "/webSSAPI.fcgi?" + query)
-                          val conn = (url.openConnection() as HttpURLConnection).apply {
-                              requestMethod = "GET"
-                              connectTimeout = 3000
-                              readTimeout = 3000
-                          }
-                          val code = conn.responseCode
-                          conn.disconnect()
-                          runOnUiThread {
-                              statusText.text = if (code in 200..299) "Comanda executata cu succes!" else "Eroare server boxa."
-                          }
-                      } catch (e: Exception) {
-                          runOnUiThread {
-                              statusText.text = "Eroare de conexiune la IP-ul boxei."
-                          }
+                      sendLibreCommand(query)
+                  }
+              }
+
+              private fun sendLibreCommand(query: String): Boolean {
+                  return try {
+                      val host = ipInput.text.toString().trim()
+                      val url = URL("http://" + host + "/webSSAPI.fcgi?" + query)
+                      val conn = (url.openConnection() as HttpURLConnection).apply {
+                          requestMethod = "GET"
+                          connectTimeout = 3000
+                          readTimeout = 3000
                       }
+                      val code = conn.responseCode
+                      conn.disconnect()
+                      val success = code in 200..299
+                      runOnUiThread {
+                          statusText.text = if (success) "Comanda executata cu succes!" else "Eroare server boxa."
+                      }
+                      success
+                  } catch (e: Exception) {
+                      runOnUiThread {
+                          statusText.text = "Eroare de conexiune la IP-ul boxei."
+                      }
+                      false
                   }
               }
           }

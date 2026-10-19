@@ -115,6 +115,7 @@ jobs:
           import android.text.InputType
           import android.view.Gravity
           import android.widget.*
+          import java.io.OutputStreamWriter
           import java.net.HttpURLConnection
           import java.net.URL
           import java.util.Calendar
@@ -152,8 +153,8 @@ jobs:
                   layout.addView(title)
 
                   ipInput = EditText(this).apply {
-                      setText(prefs.getString("ip", "10.121.25.170"))
-                      hint = "IP Boxa (ex: 10.121.25.170)"
+                      setText(prefs.getString("ip", "10.121.25.170:49152"))
+                      hint = "IP:Port Boxa (ex: 10.121.25.170:49152)"
                       setTextColor(Color.WHITE)
                       setHintTextColor(Color.GRAY)
                       inputType = InputType.TYPE_CLASS_TEXT
@@ -180,7 +181,7 @@ jobs:
                           override fun onStartTrackingTouch(s: SeekBar?) {}
                           override fun onStopTrackingTouch(s: SeekBar?) {
                               val v = s?.progress ?: 25
-                              sendLibreCommandAsync("netRemote.sys.audio.volume=" + v)
+                              sendUpnpVolume(v)
                           }
                       })
                   }
@@ -194,13 +195,13 @@ jobs:
                       setMargins(8, 0, 8, 0)
                   }
                   transportRow.addView(makeButton("Play", "#E53935") {
-                      sendLibreCommandAsync("netRemote.play.control=1")
+                      sendUpnpControl("Play")
                   }, lp)
                   transportRow.addView(makeButton("Pause", "#424242") {
-                      sendLibreCommandAsync("netRemote.play.control=2")
+                      sendUpnpControl("Pause")
                   }, lp)
                   transportRow.addView(makeButton("Stop", "#424242") {
-                      sendLibreCommandAsync("netRemote.play.control=3")
+                      sendUpnpControl("Stop")
                   }, lp)
                   layout.addView(transportRow)
 
@@ -261,12 +262,12 @@ jobs:
 
                   for ((name, url) in stations) {
                       layout.addView(makeButton("Play: " + name, "#1E1E1E") {
-                          playRadioStream(name, url)
+                          playUpnpStream(name, url)
                       })
                   }
 
                   statusText = TextView(this).apply {
-                      text = "Pregatit. IP: 10.121.25.170"
+                      text = "Pregatit. Introdu IP:Port DLNA."
                       textSize = 14f
                       setTextColor(Color.LTGRAY)
                       gravity = Gravity.CENTER
@@ -289,7 +290,7 @@ jobs:
                           if (isAlarmActive) {
                               val now = Calendar.getInstance()
                               if (now.get(Calendar.HOUR_OF_DAY) == alarmHour && now.get(Calendar.MINUTE) == alarmMinute) {
-                                  playRadioStream("Alarma Radio", streamUrl)
+                                  playUpnpStream("Alarma Radio", streamUrl)
                                   isAlarmActive = false
                                   alarmStatusText.text = "Alarma declansata!"
                                   return
@@ -326,44 +327,85 @@ jobs:
                   }
               }
 
-              private fun playRadioStream(name: String, url: String) {
-                  statusText.text = "Se trimite " + name + "..."
+              private fun playUpnpStream(name: String, streamUrl: String) {
+                  statusText.text = "Se trimite stream " + name + "..."
                   thread {
-                      val ok = sendLibreCommand("netRemote.play.uri=" + url)
-                      runOnUiThread {
-                          statusText.text = if (ok) "Reda acum: " + name else "Eroare trimitere stream."
+                      val host = ipInput.text.toString().trim()
+                      getSharedPreferences("hama", MODE_PRIVATE).edit().putString("ip", host).apply()
+                      val soapBody = "<?xml version=\"1.0\" encoding=\"utf-8\"?>" +
+                              "<s:Envelope xmlns:s=\"http://schemas.xmlsoap.org/soap/envelope/\" s:encodingStyle=\"http://schemas.xmlsoap.org/soap/encoding/\">" +
+                              "<s:Body>" +
+                              "<u:SetAVTransportURI xmlns:u=\"urn:schemas-upnp-org:service:AVTransport:1\">" +
+                              "<InstanceID>0</InstanceID>" +
+                              "<CurrentURI>" + streamUrl + "</CurrentURI>" +
+                              "<CurrentURIMetaData></CurrentURIMetaData>" +
+                              "</u:SetAVTransportURI>" +
+                              "</s:Body>" +
+                              "</s:Envelope>"
+
+                      val ok = postSoap(host, "/upnp/control/avtransport", "urn:schemas-upnp-org:service:AVTransport:1#SetAVTransportURI", soapBody)
+                      if (ok) {
+                          sendUpnpControl("Play")
+                      } else {
+                          runOnUiThread { statusText.text = "Eroare setare stream DLNA." }
                       }
                   }
               }
 
-              private fun sendLibreCommandAsync(query: String) {
-                  val host = ipInput.text.toString().trim()
-                  getSharedPreferences("hama", MODE_PRIVATE).edit().putString("ip", host).apply()
+              private fun sendUpnpControl(action: String) {
                   thread {
-                      sendLibreCommand(query)
+                      val host = ipInput.text.toString().trim()
+                      val soapBody = "<?xml version=\"1.0\" encoding=\"utf-8\"?>" +
+                              "<s:Envelope xmlns:s=\"http://schemas.xmlsoap.org/soap/envelope/\" s:encodingStyle=\"http://schemas.xmlsoap.org/soap/encoding/\">" +
+                              "<s:Body>" +
+                              "<u:$action xmlns:u=\"urn:schemas-upnp-org:service:AVTransport:1\">" +
+                              "<InstanceID>0</InstanceID>" +
+                              "<Speed>1</Speed>" +
+                              "</u:$action>" +
+                              "</s:Body>" +
+                              "</s:Envelope>"
+
+                      val ok = postSoap(host, "/upnp/control/avtransport", "urn:schemas-upnp-org:service:AVTransport:1#$action", soapBody)
+                      runOnUiThread {
+                          statusText.text = if (ok) "Comanda $action trimisa cu succes!" else "Eroare comanda DLNA."
+                      }
                   }
               }
 
-              private fun sendLibreCommand(query: String): Boolean {
-                  return try {
+              private fun sendUpnpVolume(volume: Int) {
+                  thread {
                       val host = ipInput.text.toString().trim()
-                      val url = URL("http://" + host + "/webSSAPI.fcgi?" + query)
+                      val soapBody = "<?xml version=\"1.0\" encoding=\"utf-8\"?>" +
+                              "<s:Envelope xmlns:s=\"http://schemas.xmlsoap.org/soap/envelope/\" s:encodingStyle=\"http://schemas.xmlsoap.org/soap/encoding/\">" +
+                              "<s:Body>" +
+                              "<u:SetVolume xmlns:u=\"urn:schemas-upnp-org:service:RenderingControl:1\">" +
+                              "<InstanceID>0</InstanceID>" +
+                              "<Channel>Master</Channel>" +
+                              "<DesiredVolume>$volume</DesiredVolume>" +
+                              "</u:SetVolume>" +
+                              "</s:Body>" +
+                              "</s:Envelope>"
+
+                      postSoap(host, "/upnp/control/renderingcontrol", "urn:schemas-upnp-org:service:RenderingControl:1#SetVolume", soapBody)
+                  }
+              }
+
+              private fun postSoap(host: String, path: String, actionHeader: String, soapXml: String): Boolean {
+                  return try {
+                      val url = URL("http://$host$path")
                       val conn = (url.openConnection() as HttpURLConnection).apply {
-                          requestMethod = "GET"
+                          requestMethod = "POST"
                           connectTimeout = 3000
                           readTimeout = 3000
+                          doOutput = true
+                          setRequestProperty("Content-Type", "text/xml; charset=\"utf-8\"")
+                          setRequestProperty("SOAPAction", "\"$actionHeader\"")
                       }
+                      OutputStreamWriter(conn.outputStream).use { it.write(soapXml) }
                       val code = conn.responseCode
                       conn.disconnect()
-                      val success = code in 200..299
-                      runOnUiThread {
-                          statusText.text = if (success) "Comanda executata cu succes!" else "Eroare server boxa."
-                      }
-                      success
+                      code in 200..299
                   } catch (e: Exception) {
-                      runOnUiThread {
-                          statusText.text = "Eroare de conexiune la IP-ul boxei."
-                      }
                       false
                   }
               }

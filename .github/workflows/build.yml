@@ -16,8 +16,20 @@ jobs:
           java-version: '17'
           distribution: 'temurin'
 
-      - name: Setup Android SDK
-        uses: android-actions/setup-android@v3
+      - name: Install Android SDK Command Line Tools
+        run: |
+          export ANDROID_HOME=$HOME/android-sdk
+          mkdir -p $ANDROID_HOME/cmdline-tools
+          wget -q https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip -O cmdline-tools.zip
+          unzip -q cmdline-tools.zip -d $ANDROID_HOME/cmdline-tools
+          mv $ANDROID_HOME/cmdline-tools/cmdline-tools$ANDROID_HOME/cmdline-tools/latest
+          export PATH=$PATH:$ANDROID_HOME/cmdline-tools/latest/bin:$ANDROID_HOME/platform-tools
+          
+          yes | sdkmanager --sdk_root=$ANDROID_HOME --licenses > /dev/null
+          sdkmanager --sdk_root=$ANDROID_HOME "platform-tools" "platforms;android-34" "build-tools;34.0.0" > /dev/null
+
+          echo "ANDROID_HOME=$ANDROID_HOME" >> $GITHUB_ENV
+          echo "$ANDROID_HOME/platform-tools" >> $GITHUB_PATH
 
       - name: Generate Android Project
         run: |
@@ -401,36 +413,4 @@ jobs:
                           socket.receive(pack)
                           val resp = String(pack.data, 0, pack.length)
                           socket.close()
-                          val match = Regex("LOCATION:\\s*http://([0-9.]+:[0-9]+)", RegexOption.IGNORE_CASE).find(resp)
-                          runOnUiThread {
-                              if (match != null) {
-                                  val foundHost = match.groupValues[1]
-                                  ipInput.setText(foundHost)
-                                  getSharedPreferences("hama", MODE_PRIVATE).edit().putString("ip", foundHost).apply()
-                                  statusText.text = "Boxa gasita la: " + foundHost
-                              } else {
-                                  statusText.text = "Nu a fost gasita automat. Scrie IP-ul manual."
-                              }
-                          }
-                      } catch (e: Exception) {
-                          runOnUiThread { statusText.text = "Nu s-a gasit automat. Verifica daca boxa e pe Wi-Fi." }
-                      }
-                  }
-              }
-          }
-          EOF
-
-      - name: Build Debug APK with Gradle
-        run: |
-          chmod +x ./gradlew || true
-          if [ -f "./gradlew" ]; then
-            ./gradlew assembleDebug --no-daemon
-          else
-            gradle assembleDebug --no-daemon
-          fi
-
-      - name: Upload APK Artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: Hama-Controller-APK
-          path: app/build/outputs/apk/debug/app-debug.apk
+                          val match = Regex("

@@ -1,0 +1,355 @@
+name: Build Hama Controller APK
+on:
+  push:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v3
+        with:
+          gradle-version: '8.4'
+
+      - name: Generate Project Structure & Code
+        run: |
+          mkdir -p app/src/main/java/com/silviu/hama
+
+          cat << 'EOF' > settings.gradle
+          pluginManagement {
+              repositories {
+                  google()
+                  mavenCentral()
+                  gradlePluginPortal()
+              }
+          }
+          dependencyResolutionManagement {
+              repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
+              repositories {
+                  google()
+                  mavenCentral()
+              }
+          }
+          rootProject.name = "HamaController"
+          include ':app'
+          EOF
+
+          cat << 'EOF' > build.gradle
+          plugins {
+              id 'com.android.application' version '8.2.0' apply false
+              id 'org.jetbrains.kotlin.android' version '1.9.20' apply false
+          }
+          EOF
+
+          cat << 'EOF' > gradle.properties
+          org.gradle.jvmargs=-Xmx2048m -Dfile.encoding=UTF-8
+          android.useAndroidX=true
+          EOF
+
+          cat << 'EOF' > app/build.gradle
+          plugins {
+              id 'com.android.application'
+              id 'org.jetbrains.kotlin.android'
+          }
+          android {
+              namespace 'com.silviu.hama'
+              compileSdk 34
+              defaultConfig {
+                  applicationId "com.silviu.hama"
+                  minSdk 26
+                  targetSdk 34
+                  versionCode 1
+                  versionName "1.0"
+              }
+              compileOptions {
+                  sourceCompatibility JavaVersion.VERSION_17
+                  targetCompatibility JavaVersion.VERSION_17
+              }
+              kotlinOptions {
+                  jvmTarget = '17'
+              }
+          }
+          EOF
+
+          cat << 'EOF' > app/src/main/AndroidManifest.xml
+          <?xml version="1.0" encoding="utf-8"?>
+          <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+              <uses-permission android:name="android.permission.INTERNET" />
+              <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+              <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
+              <uses-permission android:name="android.permission.CHANGE_WIFI_MULTICAST_STATE" />
+              <application
+                  android:label="Hama Controller"
+                  android:usesCleartextTraffic="true"
+                  android:theme="@android:style/Theme.DeviceDefault.NoActionBar">
+                  <activity
+                      android:name=".MainActivity"
+                      android:exported="true">
+                      <intent-filter>
+                          <action android:name="android.intent.action.MAIN" />
+                          <category android:name="android.intent.category.LAUNCHER" />
+                      </intent-filter>
+                  </activity>
+              </application>
+          </manifest>
+          EOF
+
+          cat << 'EOF' > app/src/main/java/com/silviu/hama/MainActivity.kt
+          package com.silviu.hama
+
+          import android.app.Activity
+          import android.graphics.Color
+          import android.graphics.drawable.GradientDrawable
+          import android.os.Bundle
+          import android.text.InputType
+          import android.view.Gravity
+          import android.widget.*
+          import java.io.OutputStreamWriter
+          import java.net.DatagramPacket
+          import java.net.DatagramSocket
+          import java.net.HttpURLConnection
+          import java.net.InetAddress
+          import java.net.URL
+          import kotlin.concurrent.thread
+
+          class MainActivity : Activity() {
+              private lateinit var ipInput: EditText
+              private lateinit var statusText: TextView
+
+              override fun onCreate(savedInstanceState: Bundle?) {
+                  super.onCreate(savedInstanceState)
+                  val prefs = getSharedPreferences("hama", MODE_PRIVATE)
+
+                  val root = ScrollView(this).apply {
+                      setBackgroundColor(Color.parseColor("#121212"))
+                  }
+                  val layout = LinearLayout(this).apply {
+                      orientation = LinearLayout.VERTICAL
+                      setPadding(48, 64, 48, 64)
+                  }
+
+                  val title = TextView(this).apply {
+                      text = "Hama SIRIUM1000ABT"
+                      textSize = 24f
+                      setTextColor(Color.parseColor("#E53935"))
+                      setPadding(0, 0, 0, 32)
+                  }
+                  layout.addView(title)
+
+                  ipInput = EditText(this).apply {
+                      setText(prefs.getString("ip", "192.168.1.100:49152"))
+                      hint = "IP:Port (ex: 192.168.1.100:49152)"
+                      setTextColor(Color.WHITE)
+                      setHintTextColor(Color.GRAY)
+                      inputType = InputType.TYPE_CLASS_TEXT
+                      background = roundedBg("#2C2C2C")
+                      setPadding(32, 28, 32, 28)
+                  }
+                  layout.addView(ipInput)
+
+                  val scanBtn = makeButton("🔍 Scanează automat boxa în Wi-Fi", "#333333") {
+                      statusText.text = "Se caută boxa în rețea..."
+                      discoverSpeaker()
+                  }
+                  layout.addView(scanBtn)
+
+                  val volLabel = TextView(this).apply {
+                      text = "Volum: 25%"
+                      textSize = 16f
+                      setTextColor(Color.WHITE)
+                      setPadding(0, 36, 0, 12)
+                  }
+                  layout.addView(volLabel)
+
+                  val seekBar = SeekBar(this).apply {
+                      max = 100
+                      progress = 25
+                      setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+                          override fun onProgressChanged(s: SeekBar?, p: Int, fromUser: Boolean) {
+                              volLabel.text = "Volum: $p%"
+                          }
+                          override fun onStartTrackingTouch(s: SeekBar?) {}
+                          override fun onStopTrackingTouch(s: SeekBar?) {
+                              val v = s?.progress ?: 25
+                              sendSoap("/upnp/control/rendercontrol1", "RenderingControl", "SetVolume",
+                                  "<InstanceID>0</InstanceID><Channel>Master</Channel><DesiredVolume>$v</DesiredVolume>")
+                          }
+                      })
+                  }
+                  layout.addView(seekBar)
+
+                  val transportRow = LinearLayout(this).apply {
+                      orientation = LinearLayout.HORIZONTAL
+                      setPadding(0, 24, 0, 36)
+                  }
+                  val lp = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply {
+                      setMargins(8, 0, 8, 0)
+                  }
+                  transportRow.addView(makeButton("▶ Play", "#E53935") {
+                      sendSoap("/upnp/control/rendertransport1", "AVTransport", "Play", "<InstanceID>0</InstanceID><Speed>1</Speed>")
+                  }, lp)
+                  transportRow.addView(makeButton("⏸ Pause", "#424242") {
+                      sendSoap("/upnp/control/rendertransport1", "AVTransport", "Pause", "<InstanceID>0</InstanceID>")
+                  }, lp)
+                  transportRow.addView(makeButton("⏹ Stop", "#424242") {
+                      sendSoap("/upnp/control/rendertransport1", "AVTransport", "Stop", "<InstanceID>0</InstanceID>")
+                  }, lp)
+                  layout.addView(transportRow)
+
+                  val radioTitle = TextView(this).apply {
+                      text = "Posturi Radio Online:"
+                      textSize = 16f
+                      setTextColor(Color.WHITE)
+                      setPadding(0, 12, 0, 16)
+                  }
+                  layout.addView(radioTitle)
+
+                  val stations = listOf(
+                      "Rock FM" to "https://live.rockfm.ro/rockfm.aacp",
+                      "Radio Guerrilla" to "https://live.guerrillaradio.ro:8443/guerrilla.aac",
+                      "Europa FM" to "https://astreaming.edi.ro:8443/EuropaFM_aac",
+                      "Digi FM" to "https://edge76.rcs-rds.ro/digifm/digifm.mp3",
+                      "Kiss FM" to "https://live.kissfm.ro/kissfm.aacp"
+                  )
+
+                  for ((name, url) in stations) {
+                      layout.addView(makeButton("▶  $name", "#1E1E1E") {
+                          playStream(name, url)
+                      })
+                  }
+
+                  statusText = TextView(this).apply {
+                      text = "Pregătit. Apasă Scanare sau introdu IP-ul boxei."
+                      textSize = 14f
+                      setTextColor(Color.LTGRAY)
+                      gravity = Gravity.CENTER
+                      setPadding(0, 48, 0, 0)
+                  }
+                  layout.addView(statusText)
+
+                  root.addView(layout)
+                  setContentView(root)
+              }
+
+              private fun roundedBg(hex: String) = GradientDrawable().apply {
+                  setColor(Color.parseColor(hex))
+                  cornerRadius = 24f
+              }
+
+              private fun makeButton(label: String, colorHex: String, onClick: () -> Unit): Button {
+                  return Button(this).apply {
+                      text = label
+                      setTextColor(Color.WHITE)
+                      isAllCaps = false
+                      textSize = 15f
+                      background = roundedBg(colorHex)
+                      val params = LinearLayout.LayoutParams(
+                          LinearLayout.LayoutParams.MATCH_PARENT,
+                          LinearLayout.LayoutParams.WRAP_CONTENT
+                      ).apply { setMargins(0, 14, 0, 14) }
+                      layoutParams = params
+                      setOnClickListener { onClick() }
+                  }
+              }
+
+              private fun playStream(name: String, url: String) {
+                  statusText.text = "Se trimite $name..."
+                  thread {
+                      val ok = soapCall("/upnp/control/rendertransport1", "AVTransport", "SetAVTransportURI",
+                          "<InstanceID>0</InstanceID><CurrentURI>$url</CurrentURI><CurrentURIMetaData></CurrentURIMetaData>")
+                      if (ok) {
+                          Thread.sleep(300)
+                          soapCall("/upnp/control/rendertransport1", "AVTransport", "Play",
+                              "<InstanceID>0</InstanceID><Speed>1</Speed>")
+                      }
+                      runOnUiThread {
+                          statusText.text = if (ok) "Redă acum: $name" else "Eroare conexiune cu boxa."
+                      }
+                  }
+              }
+
+              private fun sendSoap(path: String, service: String, action: String, bodyXml: String) {
+                  val host = ipInput.text.toString().trim()
+                  getSharedPreferences("hama", MODE_PRIVATE).edit().putString("ip", host).apply()
+                  thread {
+                      val ok = soapCall(path, service, action, bodyXml)
+                      runOnUiThread {
+                          statusText.text = if (ok) "Comandă trimisă: $action" else "Eroare la $action (verifică IP-ul)"
+                      }
+                  }
+              }
+
+              private fun soapCall(path: String, service: String, action: String, bodyXml: String): Boolean {
+                  return try {
+                      val host = ipInput.text.toString().trim()
+                      val url = URL("http://$host$path")
+                      val conn = (url.openConnection() as HttpURLConnection).apply {
+                          requestMethod = "POST"
+                          connectTimeout = 3000
+                          readTimeout = 3000
+                          doOutput = true
+                          setRequestProperty("Content-Type", "text/xml; charset=\"utf-8\"")
+                          setRequestProperty("SOAPAction", "\"urn:schemas-upnp-org:service:$service:1#$action\"")
+                      }
+                      val envelope = """<?xml version="1.0" encoding="utf-8"?>
+                          <s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/" s:encodingStyle="http://schemas.xmlsoap.org/soap/encoding/">
+                          <s:Body><u:$action xmlns:u="urn:schemas-upnp-org:service:$service:1">$bodyXml</u:$action></s:Body>
+                          </s:Envelope>""".trimIndent()
+                      OutputStreamWriter(conn.outputStream).use { it.write(envelope) }
+                      val code = conn.responseCode
+                      conn.disconnect()
+                      code in 200..299
+                  } catch (e: Exception) {
+                      false
+                  }
+              }
+
+              private fun discoverSpeaker() {
+                  thread {
+                      try {
+                          val msg = "M-SEARCH * HTTP/1.1\r\nHOST: 239.255.255.250:1900\r\nMAN: \"ssdp:discover\"\r\nMX: 2\r\nST: urn:schemas-upnp-org:device:MediaRenderer:1\r\n\r\n"
+                          val socket = DatagramSocket().apply { soTimeout = 3000 }
+                          val data = msg.toByteArray()
+                          socket.send(DatagramPacket(data, data.size, InetAddress.getByName("239.255.255.250"), 1900))
+                          val buf = ByteArray(2048)
+                          val pack = DatagramPacket(buf, buf.size)
+                          socket.receive(pack)
+                          val resp = String(pack.data, 0, pack.length)
+                          socket.close()
+                          val match = Regex("LOCATION:\\s*http://([0-9.]+:[0-9]+)", RegexOption.IGNORE_CASE).find(resp)
+                          runOnUiThread {
+                              if (match != null) {
+                                  val foundHost = match.groupValues[1]
+                                  ipInput.setText(foundHost)
+                                  getSharedPreferences("hama", MODE_PRIVATE).edit().putString("ip", foundHost).apply()
+                                  statusText.text = "Boxă găsită la: $foundHost"
+                              } else {
+                                  statusText.text = "Nu a fost găsită automat. Scrie IP-ul manual."
+                              }
+                          }
+                      } catch (e: Exception) {
+                          runOnUiThread { statusText.text = "Nu s-a găsit automat. Verifică dacă boxa e pe Wi-Fi." }
+                      }
+                  }
+              }
+          }
+          EOF
+
+      - name: Build Debug APK
+        run: gradle assembleDebug
+
+      - name: Upload APK Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Hama-Controller-APK
+          path: app/build/outputs/apk/debug/app-debug.apk

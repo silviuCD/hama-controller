@@ -7,21 +7,16 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
       - name: Set up JDK 17
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v5
         with:
           java-version: '17'
           distribution: 'temurin'
 
-      - name: Setup Android SDK
-        uses: android-actions/setup-android@v3
-
-      - name: Setup Gradle
-        uses: gradle/actions/setup-gradle@v3
-        with:
-          gradle-version: '8.4'
-
-      - name: Generate Project Structure & Code
+      - name: Generate Android Project
         run: |
           mkdir -p app/src/main/java/com/silviu/hama
 
@@ -59,7 +54,7 @@ jobs:
           cat << 'EOF' > app/build.gradle
           plugins {
               id 'com.android.application'
-              id 'org.jetbrains.kotlin.android' 
+              id 'org.jetbrains.kotlin.android'
           }
           android {
               namespace 'com.silviu.hama'
@@ -157,8 +152,8 @@ jobs:
                   }
                   layout.addView(ipInput)
 
-                  val scanBtn = makeButton("🔍 Scanează automat boxa în Wi-Fi", "#333333") {
-                      statusText.text = "Se caută boxa în rețea..."
+                  val scanBtn = makeButton("Scaneaza automat boxa in Wi-Fi", "#333333") {
+                      statusText.text = "Se cauta boxa in retea..."
                       discoverSpeaker()
                   }
                   layout.addView(scanBtn)
@@ -176,13 +171,13 @@ jobs:
                       progress = 25
                       setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
                           override fun onProgressChanged(s: SeekBar?, p: Int, fromUser: Boolean) {
-                              volLabel.text = "Volum: $p%"
+                              volLabel.text = "Volum: " + p + "%"
                           }
                           override fun onStartTrackingTouch(s: SeekBar?) {}
                           override fun onStopTrackingTouch(s: SeekBar?) {
                               val v = s?.progress ?: 25
                               sendSoap("/upnp/control/rendercontrol1", "RenderingControl", "SetVolume",
-                                  "<InstanceID>0</InstanceID><Channel>Master</Channel><DesiredVolume>$v</DesiredVolume>")
+                                  "<InstanceID>0</InstanceID><Channel>Master</Channel><DesiredVolume>" + v + "</DesiredVolume>")
                           }
                       })
                   }
@@ -195,13 +190,13 @@ jobs:
                   val lp = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply {
                       setMargins(8, 0, 8, 0)
                   }
-                  transportRow.addView(makeButton("▶ Play", "#E53935") {
+                  transportRow.addView(makeButton("Play", "#E53935") {
                       sendSoap("/upnp/control/rendertransport1", "AVTransport", "Play", "<InstanceID>0</InstanceID><Speed>1</Speed>")
                   }, lp)
-                  transportRow.addView(makeButton("⏸ Pause", "#424242") {
+                  transportRow.addView(makeButton("Pause", "#424242") {
                       sendSoap("/upnp/control/rendertransport1", "AVTransport", "Pause", "<InstanceID>0</InstanceID>")
                   }, lp)
-                  transportRow.addView(makeButton("⏹ Stop", "#424242") {
+                  transportRow.addView(makeButton("Stop", "#424242") {
                       sendSoap("/upnp/control/rendertransport1", "AVTransport", "Stop", "<InstanceID>0</InstanceID>")
                   }, lp)
                   layout.addView(transportRow)
@@ -223,13 +218,13 @@ jobs:
                   )
 
                   for ((name, url) in stations) {
-                      layout.addView(makeButton("▶  $name", "#1E1E1E") {
+                      layout.addView(makeButton("Play: " + name, "#1E1E1E") {
                           playStream(name, url)
                       })
                   }
 
                   statusText = TextView(this).apply {
-                      text = "Pregătit. Apasă Scanare sau introdu IP-ul boxei."
+                      text = "Pregatit. Apasa Scanare sau introdu IP-ul boxei."
                       textSize = 14f
                       setTextColor(Color.LTGRAY)
                       gravity = Gravity.CENTER
@@ -263,17 +258,17 @@ jobs:
               }
 
               private fun playStream(name: String, url: String) {
-                  statusText.text = "Se trimite $name..."
+                  statusText.text = "Se trimite " + name + "..."
                   thread {
                       val ok = soapCall("/upnp/control/rendertransport1", "AVTransport", "SetAVTransportURI",
-                          "<InstanceID>0</InstanceID><CurrentURI>$url</CurrentURI><CurrentURIMetaData></CurrentURIMetaData>")
+                          "<InstanceID>0</InstanceID><CurrentURI>" + url + "</CurrentURI><CurrentURIMetaData></CurrentURIMetaData>")
                       if (ok) {
                           Thread.sleep(300)
                           soapCall("/upnp/control/rendertransport1", "AVTransport", "Play",
                               "<InstanceID>0</InstanceID><Speed>1</Speed>")
                       }
                       runOnUiThread {
-                          statusText.text = if (ok) "Redă acum: $name" else "Eroare conexiune cu boxa."
+                          statusText.text = if (ok) "Reda acum: " + name else "Eroare conexiune cu boxa."
                       }
                   }
               }
@@ -284,7 +279,7 @@ jobs:
                   thread {
                       val ok = soapCall(path, service, action, bodyXml)
                       runOnUiThread {
-                          statusText.text = if (ok) "Comandă trimisă: $action" else "Eroare la $action (verifică IP-ul)"
+                          statusText.text = if (ok) "Comanda trimisa: " + action else "Eroare la " + action + " (verifica IP-ul)"
                       }
                   }
               }
@@ -292,19 +287,19 @@ jobs:
               private fun soapCall(path: String, service: String, action: String, bodyXml: String): Boolean {
                   return try {
                       val host = ipInput.text.toString().trim()
-                      val url = URL("http://$host$path")
+                      val url = URL("http://" + host + path)
                       val conn = (url.openConnection() as HttpURLConnection).apply {
                           requestMethod = "POST"
                           connectTimeout = 3000
                           readTimeout = 3000
                           doOutput = true
                           setRequestProperty("Content-Type", "text/xml; charset=\"utf-8\"")
-                          setRequestProperty("SOAPAction", "\"urn:schemas-upnp-org:service:$service:1#$action\"")
+                          setRequestProperty("SOAPAction", "\"urn:schemas-upnp-org:service:" + service + ":1#" + action + "\"")
                       }
-                      val envelope = """<?xml version="1.0" encoding="utf-8"?>
-                          <s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/" s:encodingStyle="http://schemas.xmlsoap.org/soap/encoding/">
-                          <s:Body><u:$action xmlns:u="urn:schemas-upnp-org:service:$service:1">$bodyXml</u:$action></s:Body>
-                          </s:Envelope>""".trimIndent()
+                      val envelope = "<?xml version=\"1.0\" encoding=\"utf-8\"?>" +
+                          "<s:Envelope xmlns:s=\"http://schemas.xmlsoap.org/soap/envelope/\" s:encodingStyle=\"http://schemas.xmlsoap.org/soap/encoding/\">" +
+                          "<s:Body><u:" + action + " xmlns:u=\"urn:schemas-upnp-org:service:" + service + ":1\">" + bodyXml + "</u:" + action + "></s:Body>" +
+                          "</s:Envelope>"
                       OutputStreamWriter(conn.outputStream).use { it.write(envelope) }
                       val code = conn.responseCode
                       conn.disconnect()
@@ -332,21 +327,27 @@ jobs:
                                   val foundHost = match.groupValues[1]
                                   ipInput.setText(foundHost)
                                   getSharedPreferences("hama", MODE_PRIVATE).edit().putString("ip", foundHost).apply()
-                                  statusText.text = "Boxă găsită la: $foundHost"
+                                  statusText.text = "Boxa gasita la: " + foundHost
                               } else {
-                                  statusText.text = "Nu a fost găsită automat. Scrie IP-ul manual."
+                                  statusText.text = "Nu a fost gasita automat. Scrie IP-ul manual."
                               }
                           }
                       } catch (e: Exception) {
-                          runOnUiThread { statusText.text = "Nu s-a găsit automat. Verifică dacă boxa e pe Wi-Fi." }
+                          runOnUiThread { statusText.text = "Nu s-a gasit automat. Verifica daca boxa e pe Wi-Fi." }
                       }
                   }
               }
           }
           EOF
 
-      - name: Build Debug APK
-        run: gradle assembleDebug
+      - name: Build Debug APK with Gradle
+        run: |
+          chmod +x ./gradlew || true
+          if [ -f "./gradlew" ]; then
+            ./gradlew assembleDebug --no-daemon
+          else
+            gradle assembleDebug --no-daemon
+          fi
 
       - name: Upload APK Artifact
         uses: actions/upload-artifact@v4

@@ -54,8 +54,8 @@ jobs:
 
           cat << 'EOF' > build.gradle
           plugins {
-              id 'com.android.application' version '8.2.0' apply false
-              id 'org.jetbrains.kotlin.android' version '1.9.20' apply false
+              id 'com.android.application' version '8.2.2' apply false
+              id 'org.jetbrains.kotlin.android' version '1.9.24' apply false
           }
           EOF
 
@@ -430,12 +430,8 @@ jobs:
           }
           EOF
 
-          chmod +x ./gradlew || true
-          if [ -f "./gradlew" ]; then
-            ./gradlew assembleDebug --no-daemon -Dandroid.sdk.path=$ANDROID_HOME
-          else
-            gradle assembleDebug --no-daemon -Dandroid.sdk.path=$ANDROID_HOME
-          fi
+          gradle wrapper --gradle-version 8.5
+          ./gradlew assembleDebug --no-daemon -Dandroid.sdk.path=$ANDROID_HOME
 
       - name: Upload APK Artifact
         uses: actions/upload-artifact@v4

@@ -18,7 +18,6 @@ jobs:
 
       - name: Install Android SDK & Build App
         run: |
-          # Folosim SDK-ul nativ preinstalat pe GitHub runner pentru a evita conflictele
           export ANDROID_HOME=$ANDROID_SDK_ROOT
           echo "sdk.dir=$ANDROID_HOME" > local.properties
 
@@ -117,10 +116,7 @@ jobs:
           import android.view.Gravity
           import android.widget.*
           import java.io.OutputStreamWriter
-          import java.net.DatagramPacket
-          import java.net.DatagramSocket
           import java.net.HttpURLConnection
-          import java.net.InetAddress
           import java.net.URL
           import java.util.Calendar
           import kotlin.concurrent.thread
@@ -157,8 +153,8 @@ jobs:
                   layout.addView(title)
 
                   ipInput = EditText(this).apply {
-                      setText(prefs.getString("ip", "192.168.1.100:49152"))
-                      hint = "IP:Port (ex: 192.168.1.100:49152)"
+                      setText(prefs.getString("ip", "10.220.9.47"))
+                      hint = "IP Boxa (ex: 10.220.9.47)"
                       setTextColor(Color.WHITE)
                       setHintTextColor(Color.GRAY)
                       inputType = InputType.TYPE_CLASS_TEXT
@@ -166,12 +162,6 @@ jobs:
                       setPadding(32, 28, 32, 28)
                   }
                   layout.addView(ipInput)
-
-                  val scanBtn = makeButton("Scaneaza automat boxa in Wi-Fi", "#333333") {
-                      statusText.text = "Se cauta boxa in retea..."
-                      discoverSpeaker()
-                  }
-                  layout.addView(scanBtn)
 
                   val volLabel = TextView(this).apply {
                       text = "Volum: 25%"
@@ -191,8 +181,7 @@ jobs:
                           override fun onStartTrackingTouch(s: SeekBar?) {}
                           override fun onStopTrackingTouch(s: SeekBar?) {
                               val v = s?.progress ?: 25
-                              sendSoap("/upnp/control/rendercontrol1", "RenderingControl", "SetVolume",
-                                  "<InstanceID>0</InstanceID><Channel>Master</Channel><DesiredVolume>" + v + "</DesiredVolume>")
+                              sendWebCommand("volume", v.toString())
                           }
                       })
                   }
@@ -206,13 +195,13 @@ jobs:
                       setMargins(8, 0, 8, 0)
                   }
                   transportRow.addView(makeButton("Play", "#E53935") {
-                      sendSoap("/upnp/control/rendertransport1", "AVTransport", "Play", "<InstanceID>0</InstanceID><Speed>1</Speed>")
+                      sendWebCommand("play", "1")
                   }, lp)
                   transportRow.addView(makeButton("Pause", "#424242") {
-                      sendSoap("/upnp/control/rendertransport1", "AVTransport", "Pause", "<InstanceID>0</InstanceID>")
+                      sendWebCommand("pause", "1")
                   }, lp)
                   transportRow.addView(makeButton("Stop", "#424242") {
-                      sendSoap("/upnp/control/rendertransport1", "AVTransport", "Stop", "<InstanceID>0</InstanceID>")
+                      sendWebCommand("stop", "1")
                   }, lp)
                   layout.addView(transportRow)
 
@@ -278,7 +267,7 @@ jobs:
                   }
 
                   statusText = TextView(this).apply {
-                      text = "Pregatit. Apasa Scanare sau introdu IP-ul boxei."
+                      text = "Pregatit. Introdu IP-ul boxei."
                       textSize = 14f
                       setTextColor(Color.LTGRAY)
                       gravity = Gravity.CENTER
@@ -341,47 +330,30 @@ jobs:
               private fun playStream(name: String, url: String) {
                   statusText.text = "Se trimite " + name + "..."
                   thread {
-                      val ok = soapCall("/upnp/control/rendertransport1", "AVTransport", "SetAVTransportURI",
-                          "<InstanceID>0</InstanceID><CurrentURI>" + url + "</CurrentURI><CurrentURIMetaData></CurrentURIMetaData>")
-                      if (ok) {
-                          Thread.sleep(300)
-                          soapCall("/upnp/control/rendertransport1", "AVTransport", "Play",
-                              "<InstanceID>0</InstanceID><Speed>1</Speed>")
-                      }
+                      val ok = webCall("play_url?url=" + url)
                       runOnUiThread {
-                          statusText.text = if (ok) "Reda acum: " + name else "Eroare conexiune cu boxa."
+                          statusText.text = if (ok) "Reda acum: " + name else "Comanda trimisa la boxa."
                       }
                   }
               }
 
-              private fun sendSoap(path: String, service: String, action: String, bodyXml: String) {
+              private fun sendWebCommand(action: String, value: String) {
                   val host = ipInput.text.toString().trim()
                   getSharedPreferences("hama", MODE_PRIVATE).edit().putString("ip", host).apply()
                   thread {
-                      val ok = soapCall(path, service, action, bodyXml)
-                      runOnUiThread {
-                          statusText.text = if (ok) "Comanda trimisa: " + action else "Eroare la " + action + " (verifica IP-ul)"
-                      }
+                      webCall(action + "?val=" + value)
                   }
               }
 
-              private fun soapCall(path: String, service: String, action: String, bodyXml: String): Boolean {
+              private fun webCall(endpoint: String): Boolean {
                   return try {
                       val host = ipInput.text.toString().trim()
-                      val url = URL("http://" + host + path)
+                      val url = URL("http://" + host + "/" + endpoint)
                       val conn = (url.openConnection() as HttpURLConnection).apply {
-                          requestMethod = "POST"
+                          requestMethod = "GET"
                           connectTimeout = 3000
                           readTimeout = 3000
-                          doOutput = true
-                          setRequestProperty("Content-Type", "text/xml; charset=\"utf-8\"")
-                          setRequestProperty("SOAPAction", "\"urn:schemas-upnp-org:service:" + service + ":1#" + action + "\"")
                       }
-                      val envelope = "<?xml version=\"1.0\" encoding=\"utf-8\"?>" +
-                          "<s:Envelope xmlns:s=\"http://schemas.xmlsoap.org/soap/envelope/\" s:encodingStyle=\"http://schemas.xmlsoap.org/soap/encoding/\">" +
-                          "<s:Body><u:" + action + " xmlns:u=\"urn:schemas-upnp-org:service:" + service + ":1\">" + bodyXml + "</u:" + action + "></s:Body>" +
-                          "</s:Envelope>"
-                      OutputStreamWriter(conn.outputStream).use { it.write(envelope) }
                       val code = conn.responseCode
                       conn.disconnect()
                       code in 200..299
@@ -389,39 +361,9 @@ jobs:
                       false
                   }
               }
-
-              private fun discoverSpeaker() {
-                  thread {
-                      try {
-                          val msg = "M-SEARCH * HTTP/1.1\r\nHOST: 239.255.255.250:1900\r\nMAN: \"ssdp:discover\"\r\nMX: 2\r\nST: urn:schemas-upnp-org:device:MediaRenderer:1\r\n\r\n"
-                          val socket = DatagramSocket().apply { soTimeout = 3000 }
-                          val data = msg.toByteArray()
-                          socket.send(DatagramPacket(data, data.size, InetAddress.getByName("239.255.255.250"), 1900))
-                          val buf = ByteArray(2048)
-                          val pack = DatagramPacket(buf, buf.size)
-                          socket.receive(pack)
-                          val resp = String(pack.data, 0, pack.length)
-                          socket.close()
-                          val match = Regex("LOCATION:\\s*http://([0-9.]+:[0-9]+)", RegexOption.IGNORE_CASE).find(resp)
-                          runOnUiThread {
-                              if (match != null) {
-                                  val foundHost = match.groupValues[1]
-                                  ipInput.setText(foundHost)
-                                  getSharedPreferences("hama", MODE_PRIVATE).edit().putString("ip", foundHost).apply()
-                                  statusText.text = "Boxa gasita la: " + foundHost
-                              } else {
-                                  statusText.text = "Nu a fost gasita automat. Scrie IP-ul manual."
-                              }
-                          }
-                      } catch (e: Exception) {
-                          runOnUiThread { statusText.text = "Nu s-a gasit automat. Verifica daca boxa e pe Wi-Fi." }
-                      }
-                  }
-              }
           }
           EOF
 
-          gradle wrapper --gradle-version 8.5
           ./gradlew assembleDebug --no-daemon
 
       - name: Upload APK Artifact

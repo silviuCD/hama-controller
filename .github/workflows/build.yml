@@ -16,6 +16,9 @@ jobs:
           java-version: '17'
           distribution: 'temurin'
 
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
       - name: Generate Android Project
         run: |
           mkdir -p app/src/main/java/com/silviu/hama
@@ -103,9 +106,12 @@ jobs:
           package com.silviu.hama
 
           import android.app.Activity
+          import android.app.TimePickerDialog
           import android.graphics.Color
           import android.graphics.drawable.GradientDrawable
           import android.os.Bundle
+          import android.os.Handler
+          import android.os.Looper
           import android.text.InputType
           import android.view.Gravity
           import android.widget.*
@@ -115,11 +121,19 @@ jobs:
           import java.net.HttpURLConnection
           import java.net.InetAddress
           import java.net.URL
+          import java.util.Calendar
           import kotlin.concurrent.thread
 
           class MainActivity : Activity() {
               private lateinit var ipInput: EditText
               private lateinit var statusText: TextView
+              private lateinit var alarmStatusText: TextView
+
+              private var alarmHour = 7
+              private var alarmMinute = 0
+              private var isAlarmActive = false
+              private val handler = Handler(Looper.getMainLooper())
+              private var alarmRunnable: Runnable? = null
 
               override fun onCreate(savedInstanceState: Bundle?) {
                   super.onCreate(savedInstanceState)
@@ -201,11 +215,50 @@ jobs:
                   }, lp)
                   layout.addView(transportRow)
 
+                  val alarmTitle = TextView(this).apply {
+                      text = "Ceas Desteptator / Programator Radio:"
+                      textSize = 16f
+                      setTextColor(Color.WHITE)
+                      setPadding(0, 12, 0, 16)
+                  }
+                  layout.addView(alarmTitle)
+
+                  alarmStatusText = TextView(this).apply {
+                      text = "Alarma oprita (Setata la 07:00 - Rock FM)"
+                      textSize = 14f
+                      setTextColor(Color.LTGRAY)
+                      setPadding(0, 0, 0, 12)
+                  }
+                  layout.addView(alarmStatusText)
+
+                  val timeBtn = makeButton("Alege ora alarma (07:00)", "#2C2C2C") {
+                      val cal = Calendar.getInstance()
+                      TimePickerDialog(this, { _, h, m ->
+                          alarmHour = h
+                          alarmMinute = m
+                          alarmStatusText.text = String.format("Alarma oprita (Setata la %02d:%02d - Rock FM)", h, m)
+                      }, alarmHour, alarmMinute, true).show()
+                  }
+                  layout.addView(timeBtn)
+
+                  val alarmToggleBtn = makeButton("Activeaza Alarma Radio", "#2E7D32") { btn ->
+                      isAlarmActive = !isAlarmActive
+                      if (isAlarmActive) {
+                          alarmToggleBtnText(btn, "Opreste Alarma", "#C62828")
+                          alarmStatusText.text = String.format("⏰ Alarma ACTIVA pentru %02d:%02d", alarmHour, alarmMinute)
+                          startAlarmChecker("https://live.rockfm.ro/rockfm.aacp")
+                      } else {
+                          alarmToggleBtnText(btn, "Activeaza Alarma Radio", "#2E7D32")
+                          alarmStatusText.text = String.format("Alarma oprita (Setata la %02d:%02d)", alarmHour, alarmMinute)
+                          stopAlarmChecker()
+                      }
+                  }
+
                   val radioTitle = TextView(this).apply {
                       text = "Posturi Radio Online:"
                       textSize = 16f
                       setTextColor(Color.WHITE)
-                      setPadding(0, 12, 0, 16)
+                      setPadding(0, 24, 0, 16)
                   }
                   layout.addView(radioTitle)
 
@@ -236,12 +289,39 @@ jobs:
                   setContentView(root)
               }
 
+              private fun alarmToggleBtnText(btn: android.view.View, text: String, hexColor: String) {
+                  (btn as Button).text = text
+                  btn.background = roundedBg(hexColor)
+              }
+
+              private fun startAlarmChecker(streamUrl: String) {
+                  alarmRunnable = object : Runnable {
+                      override fun run() {
+                          if (isAlarmActive) {
+                              val now = Calendar.getInstance()
+                              if (now.get(Calendar.HOUR_OF_DAY) == alarmHour && now.get(Calendar.MINUTE) == alarmMinute) {
+                                  playStream("Alarma Radio", streamUrl)
+                                  isAlarmActive = false
+                                  alarmStatusText.text = "Alarma declansata!"
+                                  return
+                              }
+                              handler.postDelayed(this, 30000)
+                          }
+                      }
+                  }
+                  handler.post(alarmRunnable!!)
+              }
+
+              private fun stopAlarmChecker() {
+                  alarmRunnable?.let { handler.removeCallbacks(it) }
+              }
+
               private fun roundedBg(hex: String) = GradientDrawable().apply {
                   setColor(Color.parseColor(hex))
                   cornerRadius = 24f
               }
 
-              private fun makeButton(label: String, colorHex: String, onClick: () -> Unit): Button {
+              private fun makeButton(label: String, colorHex: String, onClick: (android.view.View) -> Unit): Button {
                   return Button(this).apply {
                       text = label
                       setTextColor(Color.WHITE)
@@ -253,7 +333,7 @@ jobs:
                           LinearLayout.LayoutParams.WRAP_CONTENT
                       ).apply { setMargins(0, 14, 0, 14) }
                       layoutParams = params
-                      setOnClickListener { onClick() }
+                      setOnClickListener { onClick(this) }
                   }
               }
 

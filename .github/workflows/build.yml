@@ -18,18 +18,9 @@ jobs:
 
       - name: Install Android SDK & Build App
         run: |
-          export ANDROID_HOME=$HOME/android-sdk
-          mkdir -p $ANDROID_HOME/cmdline-tools
-          wget -q https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip -O cmdline-tools.zip
-          unzip -q cmdline-tools.zip -d temp_tools
-          mkdir -p $ANDROID_HOME/cmdline-tools/latest
-          mv temp_tools/cmdline-tools/* $ANDROID_HOME/cmdline-tools/latest/
-          rm -rf cmdline-tools.zip temp_tools
-
-          export PATH=$PATH:$ANDROID_HOME/cmdline-tools/latest/bin:$ANDROID_HOME/platform-tools
-
-          yes | sdkmanager --sdk_root=$ANDROID_HOME --licenses > /dev/null
-          sdkmanager --sdk_root=$ANDROID_HOME "platform-tools" "platforms;android-34" "build-tools;34.0.0" > /dev/null
+          # Folosim SDK-ul nativ preinstalat pe GitHub runner pentru a evita conflictele
+          export ANDROID_HOME=$ANDROID_SDK_ROOT
+          echo "sdk.dir=$ANDROID_HOME" > local.properties
 
           mkdir -p app/src/main/java/com/silviu/hama
 
@@ -431,7 +422,7 @@ jobs:
           EOF
 
           gradle wrapper --gradle-version 8.5
-          ./gradlew assembleDebug --no-daemon -Dandroid.sdk.path=$ANDROID_HOME
+          ./gradlew assembleDebug --no-daemon
 
       - name: Upload APK Artifact
         uses: actions/upload-artifact@v4

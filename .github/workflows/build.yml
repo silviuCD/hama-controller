@@ -16,20 +16,8 @@ jobs:
           java-version: '17'
           distribution: 'temurin'
 
-      - name: Install Android SDK Command Line Tools
-        run: |
-          export ANDROID_HOME=$HOME/android-sdk
-          mkdir -p $ANDROID_HOME/cmdline-tools
-          wget -q https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip -O cmdline-tools.zip
-          unzip -q cmdline-tools.zip -d $ANDROID_HOME/cmdline-tools
-          mv $ANDROID_HOME/cmdline-tools/cmdline-tools$ANDROID_HOME/cmdline-tools/latest
-          export PATH=$PATH:$ANDROID_HOME/cmdline-tools/latest/bin:$ANDROID_HOME/platform-tools
-          
-          yes | sdkmanager --sdk_root=$ANDROID_HOME --licenses > /dev/null
-          sdkmanager --sdk_root=$ANDROID_HOME "platform-tools" "platforms;android-34" "build-tools;34.0.0" > /dev/null
-
-          echo "ANDROID_HOME=$ANDROID_HOME" >> $GITHUB_ENV
-          echo "$ANDROID_HOME/platform-tools" >> $GITHUB_PATH
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v2
 
       - name: Generate Android Project
         run: |
@@ -413,4 +401,7 @@ jobs:
                           socket.receive(pack)
                           val resp = String(pack.data, 0, pack.length)
                           socket.close()
-                          val match = Regex("
+                          val match = Regex("LOCATION:\\s*http://([0-9.]+:[0-9]+)", RegexOption.IGNORE_CASE).find(resp)
+                          runOnUiThread {
+                              if (match != null) {
+                                  val foundHost = match.groupValues[1]

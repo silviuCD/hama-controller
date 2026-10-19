@@ -16,11 +16,21 @@ jobs:
           java-version: '17'
           distribution: 'temurin'
 
-      - name: Setup Android SDK
-        uses: android-actions/setup-android@v2
-
-      - name: Generate Android Project
+      - name: Install Android SDK & Build App
         run: |
+          # Instalare Android SDK Command Line Tools
+          export ANDROID_HOME=$HOME/android-sdk
+          mkdir -p $ANDROID_HOME/cmdline-tools
+          wget -q https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip -O cmdline-tools.zip
+          unzip -q cmdline-tools.zip -d $ANDROID_HOME/cmdline-tools
+          mv $ANDROID_HOME/cmdline-tools/cmdline-tools$ANDROID_HOME/cmdline-tools/latest
+          export PATH=$PATH:$ANDROID_HOME/cmdline-tools/latest/bin:$ANDROID_HOME/platform-tools
+
+          # Acceptare licențe și instalare pachete necesare
+          yes | sdkmanager --sdk_root=$ANDROID_HOME --licenses > /dev/null
+          sdkmanager --sdk_root=$ANDROID_HOME "platform-tools" "platforms;android-34" "build-tools;34.0.0" > /dev/null
+
+          # Generare structură proiect Android
           mkdir -p app/src/main/java/com/silviu/hama
 
           cat << 'EOF' > settings.gradle
@@ -393,15 +403,4 @@ jobs:
                   thread {
                       try {
                           val msg = "M-SEARCH * HTTP/1.1\r\nHOST: 239.255.255.250:1900\r\nMAN: \"ssdp:discover\"\r\nMX: 2\r\nST: urn:schemas-upnp-org:device:MediaRenderer:1\r\n\r\n"
-                          val socket = DatagramSocket().apply { soTimeout = 3000 }
-                          val data = msg.toByteArray()
-                          socket.send(DatagramPacket(data, data.size, InetAddress.getByName("239.255.255.250"), 1900))
-                          val buf = ByteArray(2048)
-                          val pack = DatagramPacket(buf, buf.size)
-                          socket.receive(pack)
-                          val resp = String(pack.data, 0, pack.length)
-                          socket.close()
-                          val match = Regex("LOCATION:\\s*http://([0-9.]+:[0-9]+)", RegexOption.IGNORE_CASE).find(resp)
-                          runOnUiThread {
-                              if (match != null) {
-                                  val foundHost = match.groupValues[1]
+                          val socket = DatagramSocket().

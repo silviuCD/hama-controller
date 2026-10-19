@@ -59,7 +59,7 @@ jobs:
           cat << 'EOF' > app/build.gradle
           plugins {
               id 'com.android.application'
-              id 'org.jetbrains.kotlin.android'
+              id 'org.jetbrains.kotlin.android' 
           }
           android {
               namespace 'com.silviu.hama'

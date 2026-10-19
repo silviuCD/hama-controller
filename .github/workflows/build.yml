@@ -115,7 +115,6 @@ jobs:
           import android.text.InputType
           import android.view.Gravity
           import android.widget.*
-          import java.io.OutputStreamWriter
           import java.net.HttpURLConnection
           import java.net.URL
           import java.util.Calendar
@@ -153,8 +152,8 @@ jobs:
                   layout.addView(title)
 
                   ipInput = EditText(this).apply {
-                      setText(prefs.getString("ip", "10.220.9.47"))
-                      hint = "IP Boxa (ex: 10.220.9.47)"
+                      setText(prefs.getString("ip", "10.121.25.170"))
+                      hint = "IP Boxa (ex: 10.121.25.170)"
                       setTextColor(Color.WHITE)
                       setHintTextColor(Color.GRAY)
                       inputType = InputType.TYPE_CLASS_TEXT
@@ -181,7 +180,7 @@ jobs:
                           override fun onStartTrackingTouch(s: SeekBar?) {}
                           override fun onStopTrackingTouch(s: SeekBar?) {
                               val v = s?.progress ?: 25
-                              sendWebCommand("volume", v.toString())
+                              sendLibreCommand("netRemote.sys.audio.volume=" + v)
                           }
                       })
                   }
@@ -195,13 +194,13 @@ jobs:
                       setMargins(8, 0, 8, 0)
                   }
                   transportRow.addView(makeButton("Play", "#E53935") {
-                      sendWebCommand("play", "1")
+                      sendLibreCommand("netRemote.play.control=1")
                   }, lp)
                   transportRow.addView(makeButton("Pause", "#424242") {
-                      sendWebCommand("pause", "1")
+                      sendLibreCommand("netRemote.play.control=2")
                   }, lp)
                   transportRow.addView(makeButton("Stop", "#424242") {
-                      sendWebCommand("stop", "1")
+                      sendLibreCommand("netRemote.play.control=3")
                   }, lp)
                   layout.addView(transportRow)
 
@@ -262,12 +261,12 @@ jobs:
 
                   for ((name, url) in stations) {
                       layout.addView(makeButton("Play: " + name, "#1E1E1E") {
-                          playStream(name, url)
+                          playRadioStream(name, url)
                       })
                   }
 
                   statusText = TextView(this).apply {
-                      text = "Pregatit. Introdu IP-ul boxei."
+                      text = "Pregatit. IP: 10.121.25.170"
                       textSize = 14f
                       setTextColor(Color.LTGRAY)
                       gravity = Gravity.CENTER
@@ -290,7 +289,7 @@ jobs:
                           if (isAlarmActive) {
                               val now = Calendar.getInstance()
                               if (now.get(Calendar.HOUR_OF_DAY) == alarmHour && now.get(Calendar.MINUTE) == alarmMinute) {
-                                  playStream("Alarma Radio", streamUrl)
+                                  playRadioStream("Alarma Radio", streamUrl)
                                   isAlarmActive = false
                                   alarmStatusText.text = "Alarma declansata!"
                                   return
@@ -327,47 +326,7 @@ jobs:
                   }
               }
 
-              private fun playStream(name: String, url: String) {
+              private fun playRadioStream(name: String, url: String) {
                   statusText.text = "Se trimite " + name + "..."
                   thread {
-                      val ok = webCall("play_url?url=" + url)
-                      runOnUiThread {
-                          statusText.text = if (ok) "Reda acum: " + name else "Comanda trimisa la boxa."
-                      }
-                  }
-              }
-
-              private fun sendWebCommand(action: String, value: String) {
-                  val host = ipInput.text.toString().trim()
-                  getSharedPreferences("hama", MODE_PRIVATE).edit().putString("ip", host).apply()
-                  thread {
-                      webCall(action + "?val=" + value)
-                  }
-              }
-
-              private fun webCall(endpoint: String): Boolean {
-                  return try {
-                      val host = ipInput.text.toString().trim()
-                      val url = URL("http://" + host + "/" + endpoint)
-                      val conn = (url.openConnection() as HttpURLConnection).apply {
-                          requestMethod = "GET"
-                          connectTimeout = 3000
-                          readTimeout = 3000
-                      }
-                      val code = conn.responseCode
-                      conn.disconnect()
-                      code in 200..299
-                  } catch (e: Exception) {
-                      false
-                  }
-              }
-          }
-          EOF
-
-          ./gradlew assembleDebug --no-daemon
-
-      - name: Upload APK Artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: Hama-Controller-APK
-          path: app/build/outputs/apk/debug/app-debug.apk
+                      val ok = sendLibreCommand("netRemote.play.uri=" + url)

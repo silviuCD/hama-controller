@@ -353,7 +353,7 @@ jobs:
                               statusText.text = if (code in 200..299) "Comanda executata cu succes!" else "Eroare server boxa."
                           }
                       } catch (e: Exception) {
-                        runOnUiThread {
+                          runOnUiThread {
                               statusText.text = "Eroare de conexiune la IP-ul boxei."
                           }
                       }
@@ -362,6 +362,7 @@ jobs:
           }
           EOF
 
+          gradle wrapper --gradle-version 8.5
           ./gradlew assembleDebug --no-daemon
 
       - name: Upload APK Artifact
